@@ -1,0 +1,127 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Microsoft Cognitive Language Service - Custom Question Answering",
+    "description": "A question answering service.",
+    "version": "2023-04-01"
+  },
+  "servers": [
+    {
+      "url": "https://build-demo-language-resource.cognitiveservices.azure.com/language"
+    }
+  ],
+  "security": [
+    {
+      "language-demo-connection": []
+    }
+  ],
+  "paths": {
+    "/:query-knowledgebases": {
+      "post": {
+        "description": "Answers the specified question using your knowledge base.",
+        "operationId": "CQA_Query_Knowledgebases",
+        "parameters": [
+          {
+            "name": "projectName",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "default": "cqa-project"
+            },
+            "description": "The name of the project to use. value must be 'cqa-project'"
+          },
+          {
+            "name": "deploymentName",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "default": "production"
+            },
+            "description": "The name of the specific deployment of the project to use. value must be 'production'"
+          },
+          {
+            "name": "api-version",
+            "in": "query",
+            "description": "API version. Value must be '2023-04-01'",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "default": "2023-04-01"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The payload required to invoke the service and retrieve an answer from the knowledge base",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryKBInput"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "language-demo-connection": {
+        "type": "apiKey",
+        "description": "A subscription key for a Language service resource.",
+        "name": "ocp-apim-subscription-key",
+        "in": "header"
+      }
+    },
+    "schemas": {
+      "QueryKBInput": {
+        "type": "object",
+        "description": "payload to query a knowledge base.",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "User question to query against the knowledge base."
+          },
+          "top": {
+            "type": "integer",
+            "description": "Max number of answers to be returned for the question.",
+            "format": "int32",
+            "default": 5
+          },
+          "confidenceScoreThreshold": {
+            "type": "number",
+            "format": "double",
+            "description": "Minimum threshold score for answers, value ranges from 0 to 1. Default value is 0.6",
+            "maximum": 1,
+            "minimum": 0,
+            "default": 0.6
+          },
+          "rankerType": {
+            "type": "string",
+            "description": "Type of ranker to be used.",
+            "x-ms-enum": {
+              "name": "RankerKind",
+              "modelAsString": true,
+              "values": [
+                {
+                  "value": "QuestionOnly",
+                  "description": "Question only ranker."
+                },
+                {
+                  "value": "Default",
+                  "description": "Default ranker."
+                }
+              ]
+            },
+            "enum": [
+              "Default",
+              "QuestionOnly"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,37 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<LangVersion>latest</LangVersion>
+		<ImplicitUsings>disable</ImplicitUsings>
+    <noWarn>SKEXP0080;SKEXP0110</noWarn>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="../../../semantic-kernel-1/dotnet/src/Agents/AzureAI/Agents.AzureAI.csproj" />
+		<ProjectReference Include="../../../semantic-kernel-1/dotnet/src/SemanticKernel.Abstractions/SemanticKernel.Abstractions.csproj" />
+		<ProjectReference Include="../../../semantic-kernel-1/dotnet/src/SemanticKernel.Core/SemanticKernel.Core.csproj" />
+		<ProjectReference Include="../../../semantic-kernel-1/dotnet/src/experimental/Process.Abstractions/Process.Abstractions.csproj" />
+		<ProjectReference Include="../../../semantic-kernel-1/dotnet/src/experimental/Process.Core/Process.Core.csproj" />
+		<ProjectReference Include="../../../semantic-kernel-1/dotnet/src/experimental/Process.LocalRuntime/Process.LocalRuntime.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Azure.AI.Agents.Persistent" Version="1.0.0" />
+		<PackageReference Include="DotNetEnv" Version="3.1.1" />
+		<PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="9.1.0-preview.1.25064.3" />
+		<PackageReference Include="Azure.AI.OpenAI" Version="2.2.0-beta.4" />
+		<PackageReference Include="Azure.Identity" Version="1.13.2" />
+		<PackageReference Include="Microsoft.Agents.Authentication.Msal" Version="1.1.*-*" />
+		<PackageReference Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.1.*-*" />
+		<PackageReference Include="Microsoft.Agents.Builder" Version="1.1.91-beta" />
+		<!-- <PackageReference Include="Microsoft.SemanticKernel" Version="1.51.0" />
+		<PackageReference Include="Microsoft.SemanticKernel.Agents.Abstractions " Version="1.51.0" />
+		<PackageReference Include="Microsoft.SemanticKernel.Process.Core" Version="1.51.0-alpha" />
+		<PackageReference Include="Microsoft.SemanticKernel.Process.LocalRuntime" Version="1.51.0-alpha" /> -->
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="../../.env" Link=".env" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
+</Project>

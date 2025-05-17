@@ -10,10 +10,11 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using OpenAI.Chat;
-using StreamingMessageAgent;
 using System;
 using System.ClientModel;
 using System.Threading;
+using Azure.AI.Agents.Persistent;
+using Azure.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -33,11 +34,8 @@ builder.Logging.AddConsole();
 builder.AddAgentApplicationOptions();
 builder.AddAgentCore();
 
-builder.Services.AddSingleton<IConversationReferenceStore, InMemoryConversationReferenceStore>();
-
-
 // Add the Agent
-builder.AddAgent<StreamingAgent>();
+builder.AddAgent<BuddyAgent>();
 
 // Register IStorage.  For development, MemoryStorage is suitable.
 // For production Agents, persisted storage should be used so
@@ -45,7 +43,20 @@ builder.AddAgent<StreamingAgent>();
 // in a cluster of Agent instances.
 builder.Services.AddSingleton<IStorage, MemoryStorage>();
 
-builder.Services.AddSingleton<MyEventTriggerService>();
+builder.Services.AddSingleton<SendUserMessageService>();
+builder.Services.AddSingleton<RespondToEmailWorkflowService>();
+
+// Add in-memory storage
+builder.Services.AddSingleton<IConversationStateStore, InMemoryConversationStateStore>();
+builder.Services.AddSingleton<IProcessStateStore, ProcessStateStore>();
+
+builder.Services.AddSingleton<PersistentAgentsClient>(sp =>
+{
+    //Create a PersistentAgentsClient and PersistentAgent.
+    PersistentAgentsClient client = new("https://mabolan-build-2025-demo-resource.services.ai.azure.com/api/projects/mabolan-build-2025-demo", new DefaultAzureCredential());
+
+    return client;
+});
 
 var app = builder.Build();
 
@@ -58,14 +69,12 @@ app.MapPost("/api/messages", async (HttpRequest request, HttpResponse response, 
 })
     .AllowAnonymous();
 
-app.MapPost("/api/trigger", async (
-    HttpContext context,
-    MyEventTriggerService eventTrigger,
+app.MapPost("/api/new-email", async (
+    Email request,
+    RespondToEmailWorkflowService workflowService,
     CancellationToken cancellationToken) =>
 {
-    string conversationId = context.Request.Query["conversationId"]!;
-    await eventTrigger.SendCustomEventAsync(cancellationToken);
-    return Results.Ok("Event sent.");
+    await workflowService.StartWorkflow(request, cancellationToken);
 })
     .AllowAnonymous();
 

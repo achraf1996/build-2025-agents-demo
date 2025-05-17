@@ -2,13 +2,13 @@
     "version": "0.2.0",
     "configurations": [
       {
-        "name": "Run Buddy",
+        "name": "Run SupportBuddy",
         "type": "coreclr",
         "request": "launch",
         "preLaunchTask": "build",
-        "program": "${workspaceFolder}/src/buddy/bin/Debug/net8.0/Buddy.dll",
+        "program": "${workspaceFolder}/src/SupportBuddy/bin/Debug/net8.0/SupportBuddy.dll",
         "args": [],
-        "cwd": "${workspaceFolder}/src/buddy",
+        "cwd": "${workspaceFolder}/src/SupportBuddy",
         "stopAtEntry": false,
         "console": "integratedTerminal"
       }
