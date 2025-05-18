@@ -41,4 +41,18 @@ public class InMemoryConversationStateStore : IConversationStateStore
 
         return Task.FromResult(value);
     }
+
+    public Task AnswerQuestion(string key, string emailId, string questionId, string answer)
+    {
+        if (_store.TryGetValue(key, out var reference))
+        {
+            var questionAnswer = reference.QuestionAnswer.FirstOrDefault(x => x.QuestionId == questionId && x.EmailId == emailId);
+            if (questionAnswer != null)
+            {
+                questionAnswer.Answer = answer;
+            }
+        }
+
+        return Task.CompletedTask;
+    }
 }

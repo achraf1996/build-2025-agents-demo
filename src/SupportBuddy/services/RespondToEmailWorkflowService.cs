@@ -1,135 +1,157 @@
-
+using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.Agents;
+using Azure.AI.Agents.Persistent;
 
 using Events;
 using Steps;
-using System;
-using Azure.AI.Agents.Persistent;
-using Microsoft.Extensions.DependencyInjection;
 
 public class RespondToEmailWorkflowService(
     SendUserMessageService sendUserMessageService,
     PersistentAgentsClient clientProvider,
-    IProcessStateStore processStateStore
-)
+    IProcessStateStore processStateStore)
 {
-
+    /// <summary>
+    /// Starts a new workflow process based on the incoming email.
+    /// </summary>
     public async Task StartWorkflow(Email email, CancellationToken cancellationToken)
     {
-        Kernel kernel = CreateKernel();
-        KernelProcess kernelProcess = CreateWorkflow();
+        var kernel = CreateKernel();
+        var kernelProcess = await CreateWorkflowAsync();
 
-        // Start the process with an initial external event
+        TreePrinter.Print($"Process starting with ID: " + email.Id, ConsoleColor.Blue);
+        TreePrinter.Indent();
+
+        // Kick off the workflow with an initial StartProcess event containing the email
         var runningProcess = await kernelProcess.StartAsync(
             kernel,
-            new KernelProcessEvent()
+            new KernelProcessEvent
             {
                 Id = ProcessEvents.StartProcess,
                 Data = email
             });
 
-        // Get the process state
-        var state = await runningProcess.GetStateAsync();
 
-        // Save the process state to the store
-        await processStateStore.SaveAsync(
-            email.Id,
-            state
-        );
+        // Save the resulting process state for future continuation
+        var state = await runningProcess.GetStateAsync();
+        await processStateStore.SaveAsync(email.Id, state);
+        var test = await processStateStore.GetAsync(email.Id);
+
+        TreePrinter.Print($"Process finished", ConsoleColor.Green);
+        TreePrinter.Unindent();
     }
 
-    public async Task ContinueWorkflow(string emailId, string userMessage, CancellationToken cancellationToken)
+    /// <summary>
+    /// Continues a previously saved workflow with user-provided answers.
+    /// </summary>
+    public async Task ContinueWorkflow(string emailId, List<QuestionAnswer> answeredQuestions)
     {
-        Kernel kernel = CreateKernel();
+        var kernel = CreateKernel();
 
-        // Get the process state from the store
+        TreePrinter.Print($"Process resuming with ID: {emailId}", ConsoleColor.Blue);
+        TreePrinter.Indent();
+
+        // Load saved process state by email ID
         var processState = await processStateStore.GetAsync(emailId);
-
         if (processState == null)
         {
-            Console.WriteLine($"No process state found for email ID: {emailId}");
+            TreePrinter.Print($"Error: No process found with ID: {emailId}", ConsoleColor.Red);
             return;
         }
 
-        // Continue the process with an external event
+        // Resume process with the user's answers
         await processState.StartAsync(
             kernel,
-            new KernelProcessEvent()
+            new KernelProcessEvent
             {
                 Id = ProcessEvents.ReceiveUserMessage,
-                Data = userMessage
+                Data = answeredQuestions
             });
-    }   
 
+        TreePrinter.Print($"Process finished", ConsoleColor.Green);
+        TreePrinter.Unindent();
+    }
+
+    /// <summary>
+    /// Creates a kernel with the necessary services registered for the workflow.
+    /// </summary>
     private Kernel CreateKernel()
     {
-        // Create a simple kernel 
-        IKernelBuilder kernelBuilder = Kernel.CreateBuilder();
+        var kernelBuilder = Kernel.CreateBuilder();
         kernelBuilder.Services.AddSingleton(clientProvider);
         kernelBuilder.Services.AddSingleton(sendUserMessageService);
         return kernelBuilder.Build();
     }
 
-    private KernelProcess CreateWorkflow()
+    /// <summary>
+    /// Constructs the full process definition, including steps and transitions.
+    /// </summary>
+    private async Task<KernelProcess> CreateWorkflowAsync()
     {
+        // Create all threads in parallel
+        var createThreadsTask = Task.WhenAll(
+            clientProvider.Threads.CreateThreadAsync(), // mainThread
+            clientProvider.Threads.CreateThreadAsync(), // faqThread
+            clientProvider.Threads.CreateThreadAsync()  // ragThread
+        );
 
-        // Create a process that will interact with the chat completion service
-        ProcessBuilder process = new("ChatBot");
-        var init = process.AddStepFromType<Init>();
-        var emailTriageAgent = process.AddStepFromType<TriageAgent>();
-        var faqAgent = process.AddStepFromType<FaqAgent>();
-        var raqAgent = process.AddStepFromType<RagAgent>();
-        var relayAgent = process.AddStepFromType<RelayAgent>();
-        var askUserAgent = process.AddStepFromType<AskUser>();
-        var replyAgent = process.AddStepFromType<ReplyAgent>();
+        // Send message to main thread
+        var threads = await createThreadsTask;
+        ThreadsCollection threadsCollection = new ThreadsCollection
+        {
+            MainThreadId = threads[0].Value.Id,
+            FaqThreadId = threads[1].Value.Id,
+            RagThreadId = threads[2].Value.Id
+        };
 
-        // Define the process flow
+        BaseEmailWorkflowStepState state = new()
+        {
+            Threads = threadsCollection
+        };
+
+        var process = new ProcessBuilder("ChatBot");
+
+        // Define all steps in the process
+        var emailTriageAgent = process.AddStepFromType<TriageAgent, BaseEmailWorkflowStepState>(initialState: state);
+        var faqAgent = process.AddStepFromType<FaqAgent, BaseEmailWorkflowStepState>(initialState: state);
+        var ragAgent = process.AddStepFromType<RagAgent, BaseEmailWorkflowStepState>(initialState: state);
+        var OrchestratorAgent = process.AddStepFromType<OrchestratorAgent, OrchestratorState>(initialState: new(state));
+        var askUserAgent = process.AddStepFromType<AskUser, BaseEmailWorkflowStepState>(initialState: state);
+        var replyAgent = process.AddStepFromType<ReplyAgent, BaseEmailWorkflowStepState>(initialState: state);
+
+        // Define input events and initial routing
         process
             .OnInputEvent(ProcessEvents.StartProcess)
-            .SendEventTo(new ProcessFunctionTargetBuilder(init));
+            .SendEventTo(new ProcessFunctionTargetBuilder(emailTriageAgent));
 
-        init
-            .OnFunctionResult()
-            .SendEventTo(new ProcessFunctionTargetBuilder(emailTriageAgent, "init"))
-            .SendEventTo(new ProcessFunctionTargetBuilder(faqAgent, "init"))
-            .SendEventTo(new ProcessFunctionTargetBuilder(raqAgent, "init"))
-            .SendEventTo(new ProcessFunctionTargetBuilder(relayAgent, "init"))
-            .SendEventTo(new ProcessFunctionTargetBuilder(askUserAgent, "init"))
-            .SendEventTo(new ProcessFunctionTargetBuilder(replyAgent, "init"));
+        process
+            .OnInputEvent(ProcessEvents.ReceiveUserMessage)
+            .SendEventTo(new ProcessFunctionTargetBuilder(OrchestratorAgent, "receiveUserResponse"));
 
-        emailTriageAgent
-            .OnFunctionResult("init")
-            .SendEventTo(new ProcessFunctionTargetBuilder(emailTriageAgent, "execute"));
+        emailTriageAgent.OnFunctionResult("execute")
+            .SendEventTo(new ProcessFunctionTargetBuilder(faqAgent))
+            .SendEventTo(new ProcessFunctionTargetBuilder(ragAgent));
 
-        emailTriageAgent
-            .OnFunctionResult("execute")
-            .SendEventTo(new ProcessFunctionTargetBuilder(faqAgent, "execute"))
-            .SendEventTo(new ProcessFunctionTargetBuilder(raqAgent, "execute"));
+        // FAQ and RAG agents forward results to RELAY
+        faqAgent.OnFunctionResult("execute")
+            .SendEventTo(new ProcessFunctionTargetBuilder(OrchestratorAgent, "execute", parameterName: "faqAnswers"));
 
-        faqAgent
-            .OnFunctionResult("execute")
-            .SendEventTo(new ProcessFunctionTargetBuilder(relayAgent, "execute", "faqAnswers"));
+        ragAgent.OnFunctionResult("execute")
+            .SendEventTo(new ProcessFunctionTargetBuilder(OrchestratorAgent, "execute", parameterName: "ragAnswers"));
 
-        raqAgent
-            .OnFunctionResult("execute")
-            .SendEventTo(new ProcessFunctionTargetBuilder(relayAgent, "execute", "ragAnswers"));
+        // RELAY decides next step: ask user or send reply
+        OrchestratorAgent.OnEvent(ProcessEvents.AskUserForDetails)
+            .SendEventTo(new ProcessFunctionTargetBuilder(askUserAgent));
 
-        relayAgent
-            .OnEvent(ProcessEvents.AskUserForDetails)
-            .SendEventTo(new ProcessFunctionTargetBuilder(askUserAgent, "execute"));
+        OrchestratorAgent.OnEvent(ProcessEvents.SendEmailToCustomer)
+            .SendEventTo(new ProcessFunctionTargetBuilder(replyAgent));
 
-        relayAgent
-            .OnEvent(ProcessEvents.SendEmailToCustomer)
-            .SendEventTo(new ProcessFunctionTargetBuilder(replyAgent, "execute"));
+        // Final step ends the process
+        replyAgent.OnFunctionResult("execute").StopProcess();
 
-        replyAgent
-            .OnFunctionResult("execute")
-            .StopProcess();
-
-        // Build the process to get a handle that can be started
         return process.Build();
-    }   
+    }
 }

@@ -7,32 +7,36 @@ using System.Threading.Tasks;
 using System.IO;
 using System;
 using YamlDotNet.Core.Tokens;
+using System.Collections.Generic;
 
 namespace Steps;
 
-public sealed class RagAgent() : KernelProcessStep
+public sealed class RagAgent() : KernelProcessStep<BaseEmailWorkflowStepState>
 {
-    private ThreadsCollection _threads;
+    private BaseEmailWorkflowStepState _state;
 
-    [KernelFunction("init")]
-    public void Init(KernelProcessStepContext context, ThreadsCollection threads)
+    public override ValueTask ActivateAsync(KernelProcessStepState<BaseEmailWorkflowStepState> state)
     {
-        Console.WriteLine("Init: RagAgent");
-        _threads = threads;
+        _state = state.State;
+        return ValueTask.CompletedTask;
     }
 
     [KernelFunction("execute")]
-    public async ValueTask<string> ExecuteAsync(KernelProcessStepContext context)
+    public async ValueTask<string> ExecuteAsync(KernelProcessStepContext context, List<QuestionAnswer> questions)
     {
-        Console.WriteLine("RagAgent");
-
-        // temp await
-        await Task.Delay(1000);
-
         Env.Load(Path.Combine(AppContext.BaseDirectory, ".env"));
 
-        // Run RAG agent on RAG thread
-        // Update main thread with the RAG agent's response
+        TreePrinter.Print("RAG Agent", ConsoleColor.Cyan);
+        TreePrinter.Indent();
+
+        // temp await
+        await Task.Delay(1);
+
+        // Run RAG agent on FAQ thread
+        // Update main thread with the FAQ agent's response
+
+        TreePrinter.Print("Output: ", ConsoleColor.White);
+        TreePrinter.Unindent();
 
         return "RAG response";
     }

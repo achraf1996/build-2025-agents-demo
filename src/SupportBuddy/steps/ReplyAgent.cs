@@ -6,27 +6,27 @@ using DotNetEnv;
 using System.Threading.Tasks;
 using System.IO;
 using System;
+using System.Collections.Generic;
 
 namespace Steps;
 
-public sealed class ReplyAgent() : KernelProcessStep
+public sealed class ReplyAgent() : KernelProcessStep<BaseEmailWorkflowStepState>
 {
-    private ThreadsCollection _threads;
+    private BaseEmailWorkflowStepState _state;
 
-    [KernelFunction("init")]
-    public void Init(KernelProcessStepContext context, ThreadsCollection threads)
+    public override ValueTask ActivateAsync(KernelProcessStepState<BaseEmailWorkflowStepState> state)
     {
-        Console.WriteLine("Init: ReplyAgent");
-        _threads = threads;
+        _state = state.State;
+        return ValueTask.CompletedTask;
     }
 
     [KernelFunction("execute")]
-    public async Task ExecuteAsync(KernelProcessStepContext context)
+    public async Task ExecuteAsync(KernelProcessStepContext context, List<QuestionAnswer> QuestionAnswer)
     {
-        Console.WriteLine("ReplyAgent");
+        TreePrinter.Print("Reply agent", ConsoleColor.Cyan);
 
         // temp await
-        await Task.Delay(1000);
+        await Task.Delay(1);
 
         Env.Load(Path.Combine(AppContext.BaseDirectory, ".env"));
 

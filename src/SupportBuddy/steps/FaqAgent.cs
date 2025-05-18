@@ -6,33 +6,71 @@ using DotNetEnv;
 using System.Threading.Tasks;
 using System.IO;
 using System;
+using System.Collections.Generic;
+using Azure.AI.Agents.Persistent;
+using Microsoft.SemanticKernel.Agents.AzureAI;
+using System.Text;
 
 namespace Steps;
 
-public sealed class FaqAgent() : KernelProcessStep
+/// <summary>
+/// Executes FAQ response generation for a list of triaged questions.
+/// </summary>
+public sealed class FaqAgent(PersistentAgentsClient client) : KernelProcessStep<BaseEmailWorkflowStepState>
 {
-    private ThreadsCollection _threads;
+    private BaseEmailWorkflowStepState _state;
 
-    [KernelFunction("init")]
-    public void Init(KernelProcessStepContext context, ThreadsCollection threads)
+    /// <summary>
+    /// Binds the current process state to the step.
+    /// </summary>
+    public override ValueTask ActivateAsync(KernelProcessStepState<BaseEmailWorkflowStepState> state)
     {
-        Console.WriteLine("Init: FaqAgent");
-        _threads = threads;
+        _state = state.State;
+        return ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// Generates FAQ answers for a list of questions using the FAQ agent.
+    /// </summary>
     [KernelFunction("execute")]
-    public async ValueTask<string> ExecuteAsync(KernelProcessStepContext context)
+    public async ValueTask<string> ExecuteAsync(KernelProcessStepContext context, List<QuestionAnswer> questions)
     {
-        Console.WriteLine("FaqAgent");
-
-        // temp await
-        await Task.Delay(1000);
-
         Env.Load(Path.Combine(AppContext.BaseDirectory, ".env"));
 
-        // Run FAQ agent on FAQ thread
-        // Update main thread with the FAQ agent's response
+        TreePrinter.Print("FAQ Agent", ConsoleColor.Cyan);
+        TreePrinter.Indent();
 
-        return "FAQ response";
+        var faqAgentId = Environment.GetEnvironmentVariable("FAQ_AGENT_ID");
+        if (string.IsNullOrEmpty(faqAgentId))
+            throw new InvalidOperationException("FAQ_AGENT_ID environment variable must be set.");
+
+        var agent = new AzureAIAgent(await client.Administration.GetAgentAsync(faqAgentId), client);
+        var thread = new AzureAIAgentThread(client, _state.Threads.FaqThreadId);
+
+        TreePrinter.Print("Output: ", ConsoleColor.White);
+        TreePrinter.Indent();
+
+        var messageBuilder = new StringBuilder();
+        foreach (var qa in questions)
+        {
+            messageBuilder.AppendLine($"Q: {qa.Question}");
+        }
+
+        var fullMessage = messageBuilder.ToString();
+
+        var responseBuilder = new StringBuilder();
+        await foreach (var response in agent.InvokeStreamingAsync(fullMessage, thread))
+        {
+            if (!string.IsNullOrWhiteSpace(response.Message.Content))
+            {
+                responseBuilder.Append(response.Message.Content);
+                TreePrinter.Append(response.Message.Content, ConsoleColor.DarkGray);
+            }
+        }
+
+        TreePrinter.Unindent(); // End of output
+        TreePrinter.Unindent(); // End of agent block
+
+        return responseBuilder.ToString();
     }
 }

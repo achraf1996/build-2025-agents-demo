@@ -7,5 +7,5 @@ public class AzureAIAgentConversationState
 {
     public ConversationReference? ConversationReference { get; set; }
     public string? ThreadId { get; set; }
-    public List<UnansweredQuestions> UnansweredQuestions { get; set; } = [];
+    public List<QuestionAnswer> QuestionAnswer { get; set; } = [];
 }

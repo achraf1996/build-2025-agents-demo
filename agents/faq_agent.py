@@ -1,100 +1,131 @@
 import os
 import jsonref
 from dotenv import load_dotenv
-from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
-from azure.ai.agents.models import OpenApiTool, OpenApiConnectionAuthDetails, OpenApiConnectionSecurityScheme
+from azure.ai.projects import AIProjectClient
+from azure.ai.agents.models import (
+    OpenApiTool,
+    OpenApiConnectionAuthDetails,
+    OpenApiConnectionSecurityScheme,
+)
 
+# Load environment variables from .env
 load_dotenv()
 
-# Create an Azure AI Client from an endpoint, copied from your Azure AI Foundry project.
-# You need to login to Azure subscription via Azure CLI and set the environment variables
-project_endpoint = os.environ["PROJECT_ENDPOINT"]  # Ensure the PROJECT_ENDPOINT environment variable is set
+# Constants
+MODEL_NAME = "gpt-4.1"
+AGENT_NAME = "faq-agent"
+AGENT_ENV_KEY = "FAQ_AGENT_ID"
+OPENAPI_SPEC_PATH = os.path.join(os.path.dirname(__file__), "tools/cqa_tool.json")
+CONNECTION_ID = "/subscriptions/8038977e-bdd7-447a-a194-d640a385ebcf/resourceGroups/rg-admin-0541/providers/Microsoft.CognitiveServices/accounts/mabolan-build-2025-demo-resource/projects/mabolan-build-2025-demo/connections/language-demo-connection"
 
-# Create an AIProjectClient instance
-project_client = AIProjectClient(
-    endpoint=project_endpoint,
-    credential=DefaultAzureCredential(),  # Use Azure Default Credential for authentication
-)
-
-# Load the OpenAPI specification for the weather service from a local JSON file using jsonref to handle references
-with open(os.path.join(os.path.dirname(__file__), "tools/cqa_tool.json"), "r") as f:
-        openapi_cqa_tool = jsonref.loads(f.read())
-
-# Create Auth object for the OpenApiTool (note: using anonymous auth here; connection or managed identity requires additional setup)
-auth = OpenApiConnectionAuthDetails(
-        security_scheme=OpenApiConnectionSecurityScheme(
-            connection_id="/subscriptions/8038977e-bdd7-447a-a194-d640a385ebcf/resourceGroups/rg-admin-0541/providers/Microsoft.CognitiveServices/accounts/mabolan-build-2025-demo-resource/projects/mabolan-build-2025-demo/connections/language-demo-connection"
-        ),
-)
-
-# Initialize the main OpenAPI tool definition for weather
-openapi_tool = OpenApiTool(
-    name="faq", spec=openapi_cqa_tool, description="Gets answers to questions", auth=auth
-)
-
-with project_client:
-    agent = project_client.agents.create_agent(
-        model="gpt-4.1",  # Model deployment name
-        name="faq-agent",  # Name of the agent
-        tools=openapi_tool.definitions,
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": "answered_questions",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "answered_questions": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "question": {"type": "string"},
-                                    "answer": {"type": "string"},
-                                },
-                                "required": ["question", "answer"],
-                            },
-                        },
-                        "unanswered_questions": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "question": {"type": "string"},
-                                },
-                                "required": ["question"],
-                            },
-                        },
-                    },
-                    "required": ["answered_questions", "unanswered_questions"]
-                }
-            }
-        },
-        
-        instructions="""Get answers for the user's questions by using the faq and return the exact answer without rewriting the answer. Format the answers in JSON.
+INSTRUCTIONS = """Get answers for the user's questions by using the faq and return the exact answer without rewriting the answer. Format the answers in JSON.
 
 You MUST use the cqa_tool. Do not rely on your own knowledge.
 
 {
     "answered_questions": [
         {
-            "question": "What is the market size of the company?",
+            "questionId": "233414",
             "answer": "The market size of the company is $1 billion."
         },
         {
-            "question": "What is the user sentiment?",
+            "questionId": "221123",
             "answer": "The user sentiment is positive."
         }
     ],
-    "unanswered_questions": [
-        {
-            "question": "What is the market size of the company?"
-        },
-        {
-            "question": "What is the user sentiment?"
-        }
-    ]
+    "unanswered_questions": [""164234", "851234"]
 }"""
+
+RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "answered_questions",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "answered_questions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                },
+                "unanswered_questions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "question": {"type": "string"},
+                        },
+                        "required": ["question"],
+                    },
+                },
+            },
+            "required": ["answered_questions", "unanswered_questions"],
+        },
+    },
+}
+
+
+def get_project_endpoint() -> str:
+    endpoint = os.getenv("PROJECT_ENDPOINT")
+    if not endpoint:
+        raise EnvironmentError("PROJECT_ENDPOINT is not set in the environment.")
+    return endpoint
+
+
+def create_project_client(endpoint: str) -> AIProjectClient:
+    return AIProjectClient(endpoint=endpoint, credential=DefaultAzureCredential())
+
+
+def load_openapi_tool() -> OpenApiTool:
+    with open(OPENAPI_SPEC_PATH, "r") as f:
+        spec = jsonref.loads(f.read())
+
+    auth = OpenApiConnectionAuthDetails(
+        security_scheme=OpenApiConnectionSecurityScheme(connection_id=CONNECTION_ID)
     )
-    print(f"Created agent, ID: {agent.id}")
+
+    return OpenApiTool(name="faq", spec=spec, description="Gets answers to questions", auth=auth)
+
+
+def create_agent(client: AIProjectClient, openapi_tool: OpenApiTool):
+    agent = client.agents.create_agent(
+        model=MODEL_NAME,
+        name=AGENT_NAME,
+        tools=openapi_tool.definitions,
+        response_format=RESPONSE_FORMAT,
+        instructions=INSTRUCTIONS
+    )
+    with open(".env", "a") as f:
+        f.write(f"\n{AGENT_ENV_KEY}={agent.id}")
+    return agent
+
+
+def update_agent(client: AIProjectClient, agent_id: str, openapi_tool: OpenApiTool):
+    return client.agents.update_agent(
+        agent_id=agent_id,
+        model=MODEL_NAME,
+        name=AGENT_NAME,
+        tools=openapi_tool.definitions,
+        response_format=RESPONSE_FORMAT,
+        instructions=INSTRUCTIONS
+    )
+
+
+def main():
+    endpoint = get_project_endpoint()
+    client = create_project_client(endpoint)
+    tool = load_openapi_tool()
+
+    agent_id = os.getenv(AGENT_ENV_KEY)
+    if not agent_id:
+        agent = create_agent(client, tool)
+    else:
+        agent = update_agent(client, agent_id, tool)
+
+    print(f"{AGENT_NAME} ready with ID: {agent.id}")
+
+
+if __name__ == "__main__":
+    main()

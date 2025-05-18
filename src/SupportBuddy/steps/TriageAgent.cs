@@ -6,31 +6,95 @@ using DotNetEnv;
 using System.Threading.Tasks;
 using System.IO;
 using System;
+using Azure.AI.Agents.Persistent;
+using Microsoft.SemanticKernel.Agents.AzureAI;
+using System.Text.Json;
+using System.Collections.Generic;
+using System.Text;
 
 namespace Steps;
 
-public sealed class TriageAgent() : KernelProcessStep
+/// <summary>
+/// Runs triage on incoming emails using a streaming Azure AI agent and extracts structured questions.
+/// </summary>
+public sealed class TriageAgent(PersistentAgentsClient client) : KernelProcessStep<BaseEmailWorkflowStepState>
 {
-    private ThreadsCollection _threads;
+    private BaseEmailWorkflowStepState _state;
 
-    [KernelFunction("init")]
-    public void Init(KernelProcessStepContext context, ThreadsCollection threads)
+    /// <summary>
+    /// Binds the state when the process step is activated.
+    /// </summary>
+    public override ValueTask ActivateAsync(KernelProcessStepState<BaseEmailWorkflowStepState> state)
     {
-        Console.WriteLine("Init: TriageAgent");
-        _threads = threads;
+        _state = state.State;
+        return ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// Executes triage on an incoming email using the TRIAGE_AGENT_ID-defined agent.
+    /// It returns a list of extracted questions with unfilled answers.
+    /// </summary>
     [KernelFunction("execute")]
-    public async Task ExecuteAsync(KernelProcessStepContext context)
+    public async Task<List<QuestionAnswer>> ExecuteAsync(KernelProcessStepContext context, Email email)
     {
-        Console.WriteLine("TriageAgent");
-
-        // temp await
-        await Task.Delay(1000);
-
+        // Load .env file (if present) to access environment variables
         Env.Load(Path.Combine(AppContext.BaseDirectory, ".env"));
 
-        // Run triage agent on main thread
-        // Update faq and rag threads with the triage agent's response
+        TreePrinter.Print("Triage Agent", ConsoleColor.Cyan);
+        TreePrinter.Indent();
+
+        TreePrinter.Print("Output: ", ConsoleColor.White);
+        TreePrinter.Indent();
+
+        var thread = new AzureAIAgentThread(client, _state.Threads.MainThreadId);
+
+        // Ensure TRIAGE_AGENT_ID is defined
+        var triageAgentId = Environment.GetEnvironmentVariable("TRIAGE_AGENT_ID");
+        if (string.IsNullOrEmpty(triageAgentId))
+            throw new InvalidOperationException("TRIAGE_AGENT_ID environment variable must be set.");
+
+        var agent = new AzureAIAgent(await client.Administration.GetAgentAsync(triageAgentId), client);
+
+        var messageContent = new StringBuilder();
+
+        await foreach (var response in agent.InvokeStreamingAsync(
+            message: $"From: {email.From}\nTo: {email.To}\nSubject: {email.Subject}\n\n{email.Body}",
+            thread: thread))
+        {
+            if (!string.IsNullOrWhiteSpace(response.Message.Content))
+            {
+                messageContent.Append(response.Message.Content);
+                TreePrinter.Append(response.Message.Content, ConsoleColor.DarkGray);
+            }
+        }
+
+        // Parse the JSON result into structured questions
+        TriageResult triageResult;
+        try
+        {
+            triageResult = JsonSerializer.Deserialize<TriageResult>(messageContent.ToString()) 
+                ?? throw new InvalidOperationException("Failed to parse triage result.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException("Triage agent returned invalid JSON.", ex);
+        }
+
+        var questions = new List<QuestionAnswer>();
+        foreach (var question in triageResult.Questions)
+        {
+            questions.Add(new QuestionAnswer
+            {
+                EmailId = email.Id,
+                QuestionId = RandomStringGenerator.Generate(),
+                Question = question,
+                Answer = null
+            });
+        }
+
+        TreePrinter.Unindent();
+        TreePrinter.Unindent();
+
+        return questions;
     }
 }

@@ -9,32 +9,59 @@ using Microsoft.SemanticKernel.Agents.AzureAI;
 using Microsoft.Agents.Builder;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
+using System.Text.Json;
+using System.Linq;
+
+#nullable enable
 
 public class SendUserMessageService
 {
     private readonly CloudAdapter _adapter;
     private readonly IConversationStateStore _store;
     private readonly PersistentAgentsClient _agentsClient;
-    private AzureAIAgent? _cachedAgent;
+    private AzureAIAgent? _cachedAnswerSavingAgent;
+    private AzureAIAgent? _cachedRequestAnswerAgent;
+    private readonly Lazy<RespondToEmailWorkflowService> _respondToEmailWorkflowService;
 
     public SendUserMessageService(
         CloudAdapter adapter,
         IConversationStateStore store,
-        PersistentAgentsClient agentsClient)
+        PersistentAgentsClient agentsClient,
+        Lazy<RespondToEmailWorkflowService> respondToEmailWorkflowService)
     {
         _adapter = adapter;
         _store = store;
         _agentsClient = agentsClient;
+        _respondToEmailWorkflowService = respondToEmailWorkflowService;
     }
 
-    private async Task<AzureAIAgent> GetAgentAsync()
+    private async Task<AzureAIAgent> GetRequestAnswerAgentAsync()
     {
-        if (_cachedAgent != null) return _cachedAgent;
+        if (_cachedRequestAnswerAgent != null) return _cachedRequestAnswerAgent;
 
         var definition = await _agentsClient.Administration.GetAgentAsync("asst_kO43b9VVCywAVLTq2GBizsGy");
-        _cachedAgent = new AzureAIAgent(definition, _agentsClient);
-        return _cachedAgent;
+        _cachedRequestAnswerAgent = new AzureAIAgent(definition, _agentsClient);
+
+        return _cachedRequestAnswerAgent;
     }
+
+    private async Task<AzureAIAgent> GetAnswerSavingAgentAsync(string conversationId)
+    {
+        // if (_cachedAnswerSavingAgent != null) return _cachedAnswerSavingAgent;
+
+        var definition = await _agentsClient.Administration.GetAgentAsync("asst_kO43b9VVCywAVLTq2GBizsGy");
+        _cachedAnswerSavingAgent = new AzureAIAgent(definition, _agentsClient);
+
+        _cachedAnswerSavingAgent.Kernel.Plugins.AddFromFunctions("Customer", [
+            KernelFunctionFactory.CreateFromMethod((string emailId, string questionId, string answer) =>
+            {
+                _store.AnswerQuestion(conversationId, emailId, questionId, answer);
+            }, "SaveAnswer", "After a user has answered a question from a customer, you can use this function to save the answer to the customer. Continue asking the user for answers until all questions are answered.")
+        ]);
+
+        return _cachedAnswerSavingAgent;
+    }
+
 
     private async Task<string> GetOrCreateThreadIdAsync(AzureAIAgentConversationState state)
     {
@@ -52,7 +79,7 @@ public class SendUserMessageService
         CancellationToken cancellationToken)
     {
         var state = await _store.GetAsync(conversationId);
-        var agent = await GetAgentAsync();
+        var agent = await GetAnswerSavingAgentAsync(conversationId);
         var threadId = await GetOrCreateThreadIdAsync(state);
 
         try
@@ -62,37 +89,78 @@ public class SendUserMessageService
             var thread = new AzureAIAgentThread(_agentsClient, threadId);
             var message = new ChatMessageContent(AuthorRole.User, messageText);
 
-            await foreach (var response in agent.InvokeStreamingAsync(message, thread))
+            await foreach (var response in agent.InvokeStreamingAsync(message, thread, options: new AzureAIAgentInvokeOptions()
             {
-                turnContext.StreamingResponse.QueueTextChunk(response.Message.Content);
+                AdditionalInstructions = "If the user provided an answer, Use the Customer.SaveAnswer function to send the answer to any of the following question to the customer:\n" +
+                    JsonSerializer.Serialize(state.QuestionAnswer),
+            }))
+            {
+                turnContext.StreamingResponse.QueueTextChunk(response.Message.Content!);
             }
         }
         finally
         {
             await turnContext.StreamingResponse.EndStreamAsync(cancellationToken);
 
-            var reference = turnContext.Activity.GetConversationReference();
-            await _store.SaveAsync(reference.Conversation.Id, new AzureAIAgentConversationState
+            // Check if the user answered any questions
+            state = await _store.GetAsync(conversationId);
+
+            // Get all questions that were answered
+            var answeredQuestions = state.QuestionAnswer
+                .Where(x => !string.IsNullOrEmpty(x.Answer))
+                .ToList();
+            if (answeredQuestions.Count > 0)
             {
-                ConversationReference = reference,
-                ThreadId = threadId
-            });
+                // group the questions by emailId
+                var groupedQuestions = answeredQuestions
+                    .GroupBy(x => x.EmailId)
+                    .ToList();
+                foreach (var group in groupedQuestions)
+                {
+                    await _respondToEmailWorkflowService.Value.ContinueWorkflow(group.Key, [.. group]);
+                }
+            }
+
+            var reference = turnContext.Activity.GetConversationReference();
+            state.ConversationReference = reference;
+            state.ThreadId = threadId;
+
+            // Remove all questions that were answered
+            state.QuestionAnswer.RemoveAll(x => !string.IsNullOrEmpty(x.Answer));
+
+            await _store.SaveAsync(reference.Conversation.Id, state);
         }
     }
 
-    public async Task AskUserToAnswerQuestionsAsync(List<UnansweredQuestions> unansweredQuestions, CancellationToken cancellationToken = default)
+    public async Task AskUserToAnswerQuestionsAsync(List<QuestionAnswer> QuestionAnswer, CancellationToken cancellationToken = default)
     {
         var state = await _store.GetDefaultAsync(); ;
+        var agent = await GetRequestAnswerAgentAsync();
+        var threadId = await GetOrCreateThreadIdAsync(state);
 
         if (state == null)
         {
-            Console.WriteLine("No conversation reference found for user.");
+            TreePrinter.Print("Error: No conversation reference found for user.", ConsoleColor.Red);
             return;
         }
 
-        state.UnansweredQuestions.AddRange(unansweredQuestions);
+        state.QuestionAnswer.AddRange(QuestionAnswer);
+        await _store.SaveAsync(state.ConversationReference!.Conversation.Id, state);
 
-        await _store.SaveAsync(state.ConversationReference.Conversation.Id, state);
+        var thread = new AzureAIAgentThread(_agentsClient, threadId);
+
+        var response = agent.InvokeAsync(thread, options: new AzureAIAgentInvokeOptions()
+        {
+            AdditionalInstructions = "Ask the user to answer the following questions for the customer:\n" +
+                JsonSerializer.Serialize(QuestionAnswer)
+        });
+
+        var message = "";
+        await foreach (var item in response)
+        {
+            message += item.Message.Content;
+        }
+
 
         await _adapter.ContinueConversationAsync(
             agentAppId: "de8fc81a-145b-472a-bed5-f6348924c7db",
@@ -104,15 +172,12 @@ public class SendUserMessageService
                     {
                         Type = ActivityTypes.Message,
                         Conversation = state.ConversationReference.Conversation,
-                        Name = "customEvent",
-                        Text = "This is a test"
+                        Text = message,
                     }, ct);
-
-                Console.WriteLine($"Sent event: {results.Id}");
             },
             cancellationToken);
+
+
     }
 
-    // move agent generation to here
-    
 }

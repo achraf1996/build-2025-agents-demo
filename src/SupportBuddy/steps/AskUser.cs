@@ -12,24 +12,23 @@ using Azure.AI.Agents.Persistent;
 
 namespace Steps;
 
-public sealed class AskUser(SendUserMessageService service) : KernelProcessStep
+public sealed class AskUser(SendUserMessageService service) : KernelProcessStep<BaseEmailWorkflowStepState>
 {
-    private ThreadsCollection _threads;
+    private BaseEmailWorkflowStepState _state;
 
-    [KernelFunction("init")]
-    public void Init(KernelProcessStepContext context, ThreadsCollection threads)
+    public override ValueTask ActivateAsync(KernelProcessStepState<BaseEmailWorkflowStepState> state)
     {
-        Console.WriteLine("Init: AskUser");
-        _threads = threads;
+        _state = state.State;
+        return ValueTask.CompletedTask;
     }
 
     [KernelFunction("execute")]
-    public async Task ExecuteAsync(KernelProcessStepContext context, List<UnansweredQuestions> unansweredQuestions)
+    public async Task ExecuteAsync(KernelProcessStepContext context, List<QuestionAnswer> QuestionAnswer)
     {
-        Console.WriteLine("Asking user for details");
+        TreePrinter.Print("Asking user for details", ConsoleColor.White);
 
         Env.Load(Path.Combine(AppContext.BaseDirectory, ".env"));
         
-        await service.AskUserToAnswerQuestionsAsync(unansweredQuestions);
+        await service.AskUserToAnswerQuestionsAsync(QuestionAnswer);
     }
 }
