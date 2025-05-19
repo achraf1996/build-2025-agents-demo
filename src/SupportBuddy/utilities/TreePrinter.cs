@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 
+#nullable enable
+
 public static class TreePrinter
 {
     public record TreeToken(string Text, ConsoleColor? Color);
