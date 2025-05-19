@@ -22,39 +22,36 @@ public sealed class OrchestratorAgent() : KernelProcessStep<OrchestratorState>
         return ValueTask.CompletedTask;
     }
 
-    [KernelFunction("init")]
-    public void Init(KernelProcessStepContext context, ThreadsCollection threads)
-    {
-        // TreePrinter.Print("Initializing Orchestrator agent", ConsoleColor.White);
-        _state.Threads = threads;
-    }
-
     [KernelFunction("execute")]
-    public async Task ExecuteAsync(KernelProcessStepContext context, string faqAnswers, string ragAnswers)
+    public async Task ExecuteAsync(KernelProcessStepContext context, List<QuestionAnswer> faqAnswers, List<QuestionAnswer> ragAnswers)
     {
-        TreePrinter.Print("Orchestrator Agent", ConsoleColor.Cyan);
-        TreePrinter.Indent();
+        var orchestratorPrinter = TreePrinter.CreateSubtree("Orchestrator Agent", ConsoleColor.Cyan);
 
-        Env.Load(Path.Combine(AppContext.BaseDirectory, ".env"));
-
-        // temp await
-        await Task.Delay(1);
-
-        _state.QuestionAnswers = [
-            new QuestionAnswer
+        // Merge the FAQ and RAG answers into the state. 
+        foreach (var faqAnswer in faqAnswers)
+        {
+            var existingQa = _state.QuestionAnswers.FirstOrDefault(x => x.QuestionId == faqAnswer.QuestionId);
+            if (existingQa != null)
             {
-                EmailId = "12345",
-                QuestionId = "abcde",
-                Question = "What is your name?",
-            },
-            new QuestionAnswer
-            {
-                EmailId = "12345",
-                QuestionId = "abcde",
-                Question = "What is your favorite color?",
-                Answer = "Blue"
+                existingQa.Answer = faqAnswer.Answer ?? existingQa.Answer;
             }
-        ];
+            else
+            {
+                _state.QuestionAnswers.Add(faqAnswer);
+            }
+        }
+        foreach (var ragAnswer in ragAnswers)
+        {
+            var existingQa = _state.QuestionAnswers.FirstOrDefault(x => x.QuestionId == ragAnswer.QuestionId);
+            if (existingQa != null)
+            {
+                existingQa.Answer = ragAnswer.Answer ?? existingQa.Answer;
+            }
+            else
+            {
+                _state.QuestionAnswers.Add(ragAnswer);
+            }
+        }
 
         // Get unanswered questions from the FAQ and RAG threads
         var unansweredQuestions = _state.QuestionAnswers
@@ -63,25 +60,21 @@ public sealed class OrchestratorAgent() : KernelProcessStep<OrchestratorState>
 
         if (unansweredQuestions.Count == 0)
         {
-            TreePrinter.Print("Send email to customer", ConsoleColor.DarkYellow);
-            TreePrinter.Unindent();
-
             // If there are no unanswered questions, emit an event to notify that the user has responded
+            orchestratorPrinter.CreateSubtree("Send email to customer", ConsoleColor.DarkYellow);
             await context.EmitEventAsync(ProcessEvents.SendEmailToCustomer, _state.QuestionAnswers);
             return;
         }
 
-        TreePrinter.Print("Ask user to answer questions", ConsoleColor.DarkYellow);
-        TreePrinter.Unindent();
-
         // Emit an event to ask the user for details
+        orchestratorPrinter.CreateSubtree("Ask user to answer questions", ConsoleColor.DarkYellow);
         await context.EmitEventAsync(ProcessEvents.AskUserForDetails, unansweredQuestions);
     }
 
     [KernelFunction("receiveUserResponse")]
     public async Task ExecuteWithUserResponseAsync(KernelProcessStepContext context, List<QuestionAnswer> questionAnswers)
     {
-        TreePrinter.Print("Orchestrator Agent", ConsoleColor.Cyan);
+        var orchestratorPrinter = TreePrinter.CreateSubtree("Orchestrator Agent", ConsoleColor.Cyan);
 
         Env.Load(Path.Combine(AppContext.BaseDirectory, ".env"));
 
@@ -106,18 +99,20 @@ public sealed class OrchestratorAgent() : KernelProcessStep<OrchestratorState>
             
         if (unansweredQuestions.Count == 0)
         {
-            TreePrinter.Print("Send email to customer", ConsoleColor.DarkYellow);
-            TreePrinter.Unindent();
+            // TreePrinter.Print("Send email to customer", ConsoleColor.DarkYellow);
+            // TreePrinter.Unindent();
 
             // If there are no unanswered questions, emit an event to notify that the user has responded
+            orchestratorPrinter.CreateSubtree("Send email to customer", ConsoleColor.DarkYellow);
             await context.EmitEventAsync(ProcessEvents.SendEmailToCustomer, _state.QuestionAnswers);
             return;
         }
 
-        TreePrinter.Print("Ask user to answer questions", ConsoleColor.DarkYellow);
-        TreePrinter.Unindent();
+        // TreePrinter.Print("Ask user to answer questions", ConsoleColor.DarkYellow);
+        // TreePrinter.Unindent();
 
         // Emit an event to notify that the user has responded
+        orchestratorPrinter.CreateSubtree("Ask user to answer questions", ConsoleColor.DarkYellow);
         await context.EmitEventAsync(ProcessEvents.AskUserForDetails, unansweredQuestions);
     }
 }

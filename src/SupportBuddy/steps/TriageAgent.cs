@@ -40,11 +40,7 @@ public sealed class TriageAgent(PersistentAgentsClient client) : KernelProcessSt
         // Load .env file (if present) to access environment variables
         Env.Load(Path.Combine(AppContext.BaseDirectory, ".env"));
 
-        TreePrinter.Print("Triage Agent", ConsoleColor.Cyan);
-        TreePrinter.Indent();
-
-        TreePrinter.Print("Output: ", ConsoleColor.White);
-        TreePrinter.Indent();
+        var triagePrinter = TreePrinter.CreateSubtree("Triage Agent", ConsoleColor.Cyan);
 
         var thread = new AzureAIAgentThread(client, _state.Threads.MainThreadId);
 
@@ -57,14 +53,16 @@ public sealed class TriageAgent(PersistentAgentsClient client) : KernelProcessSt
 
         var messageContent = new StringBuilder();
 
+        var triageOutputPrinter = triagePrinter.CreateSubtree("Output: ", ConsoleColor.White);
+
         await foreach (var response in agent.InvokeStreamingAsync(
-            message: $"From: {email.From}\nTo: {email.To}\nSubject: {email.Subject}\n\n{email.Body}",
+            message: $"ID: {email.Id}\nFrom: {email.From}\nTo: {email.To}\nSubject: {email.Subject}\n\n{email.Body}",
             thread: thread))
         {
             if (!string.IsNullOrWhiteSpace(response.Message.Content))
             {
                 messageContent.Append(response.Message.Content);
-                TreePrinter.Append(response.Message.Content, ConsoleColor.DarkGray);
+                triageOutputPrinter.Append(response.Message.Content, ConsoleColor.DarkGray);
             }
         }
 
@@ -91,9 +89,6 @@ public sealed class TriageAgent(PersistentAgentsClient client) : KernelProcessSt
                 Answer = null
             });
         }
-
-        TreePrinter.Unindent();
-        TreePrinter.Unindent();
 
         return questions;
     }

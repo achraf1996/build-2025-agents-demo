@@ -11,6 +11,8 @@ using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using System.Text.Json;
 using System.Linq;
+using DotNetEnv;
+using System.IO;
 
 #nullable enable
 
@@ -37,9 +39,11 @@ public class SendUserMessageService
 
     private async Task<AzureAIAgent> GetRequestAnswerAgentAsync()
     {
+        Env.Load(Path.Combine(AppContext.BaseDirectory, ".env"));
+
         if (_cachedRequestAnswerAgent != null) return _cachedRequestAnswerAgent;
 
-        var definition = await _agentsClient.Administration.GetAgentAsync("asst_kO43b9VVCywAVLTq2GBizsGy");
+        var definition = await _agentsClient.Administration.GetAgentAsync(Environment.GetEnvironmentVariable("BUDDY_AGENT_ID"));
         _cachedRequestAnswerAgent = new AzureAIAgent(definition, _agentsClient);
 
         return _cachedRequestAnswerAgent;
@@ -49,7 +53,7 @@ public class SendUserMessageService
     {
         // if (_cachedAnswerSavingAgent != null) return _cachedAnswerSavingAgent;
 
-        var definition = await _agentsClient.Administration.GetAgentAsync("asst_kO43b9VVCywAVLTq2GBizsGy");
+        var definition = await _agentsClient.Administration.GetAgentAsync(Environment.GetEnvironmentVariable("BUDDY_AGENT_ID"));
         _cachedAnswerSavingAgent = new AzureAIAgent(definition, _agentsClient);
 
         _cachedAnswerSavingAgent.Kernel.Plugins.AddFromFunctions("Customer", [
@@ -138,12 +142,6 @@ public class SendUserMessageService
         var agent = await GetRequestAnswerAgentAsync();
         var threadId = await GetOrCreateThreadIdAsync(state);
 
-        if (state == null)
-        {
-            TreePrinter.Print("Error: No conversation reference found for user.", ConsoleColor.Red);
-            return;
-        }
-
         state.QuestionAnswer.AddRange(QuestionAnswer);
         await _store.SaveAsync(state.ConversationReference!.Conversation.Id, state);
 
@@ -151,7 +149,7 @@ public class SendUserMessageService
 
         var response = agent.InvokeAsync(thread, options: new AzureAIAgentInvokeOptions()
         {
-            AdditionalInstructions = "Ask the user to answer the following questions for the customer:\n" +
+            AdditionalInstructions = "Ignore the previous conversation. Instead, ask the user to answer the following questions for the customer:\n" +
                 JsonSerializer.Serialize(QuestionAnswer)
         });
 

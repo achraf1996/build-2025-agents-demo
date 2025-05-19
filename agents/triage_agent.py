@@ -7,7 +7,7 @@ from azure.ai.projects import AIProjectClient
 load_dotenv()
 
 # Constants
-MODEL_NAME = "gpt-4.1"
+MODEL_NAME = "gpt-4.1-mini"
 AGENT_NAME = "Triage Agent"
 AGENT_ENV_KEY = "TRIAGE_AGENT_ID"
 INSTRUCTIONS = """Look at the customer's email and break down all the questions and issues.

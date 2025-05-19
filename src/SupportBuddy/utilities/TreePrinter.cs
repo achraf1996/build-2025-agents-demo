@@ -1,191 +1,227 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 public static class TreePrinter
 {
-    private record TreeToken(string Text, ConsoleColor? Color);
-    private record TreeLine(int Level, List<TreeToken> Tokens);
+    public record TreeToken(string Text, ConsoleColor? Color);
 
-    private static readonly List<TreeLine> _lines = new();
-    private static int _currentLevel;
-    private static int _currentLineLength;
-
-    public static void Indent() => _currentLevel++;
-    public static void Unindent() => _currentLevel = Math.Max(0, _currentLevel - 1);
-
-    public static void Print(string text, ConsoleColor? color = null)
+    public sealed class TreeNode
     {
-        Console.WriteLine(); // End prior line
+        public int Level { get; }
+        public List<TreeToken> Tokens { get; } = new();
+        public List<TreeNode> Children { get; } = new();
 
-        var tokens = new List<TreeToken> { new(text, color) };
-        var line = new TreeLine(_currentLevel, tokens);
-        _lines.Add(line);
-
-        var siblingGuides = GetSiblingGuides(_lines.Count - 1);
-        int prefixWidth = GetPrefixWidth(siblingGuides);
-        _currentLineLength = prefixWidth + text.Length;
-
-        RedrawAll();
-    }
-
-
-    public static void Append(string word, ConsoleColor? color = null)
-    {
-        if (_lines.Count == 0)
+        public TreeNode(int level, string text, ConsoleColor? color)
         {
-            Print(word, color);
-            return;
-        }
-
-        var last = _lines[^1];
-        var siblingGuides = GetSiblingGuides(_lines.Count - 1);
-        var maxWidth = Console.WindowWidth;
-
-        int prefixWidth = GetPrefixWidth(siblingGuides);
-        int fullLineWidth = _currentLineLength + word.Length;
-
-        // If it will wrap
-        if (fullLineWidth > maxWidth)
-        {
-            Console.WriteLine();
-
-            bool isLast = IsLastSibling(_lines.Count - 1);
-
-            Console.ForegroundColor = ConsoleColor.White;
-            for (int i = 0; i < siblingGuides.Length - 1; i++)
-                Console.Write(siblingGuides[i] ? "│   " : "    ");
-            if (siblingGuides.Length > 0)
-                Console.Write(isLast ? "    " : "│   ");
-            Console.ResetColor();
-
-            word = word.TrimStart();
-            _currentLineLength = prefixWidth + word.Length;
-        }
-        else
-        {
-            _currentLineLength = fullLineWidth;
-        }
-
-        last.Tokens.Add(new TreeToken(word, color));
-
-        if (color.HasValue)
-            Console.ForegroundColor = color.Value;
-
-        Console.Write(word);
-        Console.ResetColor();
-    }
-
-
-
-    private static void RedrawAll()
-    {
-        Console.Clear();
-
-        for (int i = 0; i < _lines.Count; i++)
-        {
-            var line = _lines[i];
-            var siblingGuides = GetSiblingGuides(i);
-            var isLast = IsLastSibling(i);
-            var wrapWidth = Console.WindowWidth - GetPrefixWidth(siblingGuides);
-            var wrappedLines = WrapTokens(line.Tokens, wrapWidth);
-
-            foreach (var (tokens, j) in wrappedLines.Select((t, j) => (t, j)))
-            {
-                Console.ForegroundColor = ConsoleColor.White;
-
-                for (int level = 0; level < siblingGuides.Length - 1; level++)
-                    Console.Write(siblingGuides[level] ? "│   " : "    ");
-                if (siblingGuides.Length > 0)
-                    Console.Write(j == 0 ? (isLast ? "└── " : "├── ") : (isLast ? "    " : "│   "));
-
-                Console.ResetColor();
-
-                foreach (var (Text, Color) in tokens)
-                {
-                    var isFirstToken = tokens[0].Text == Text && tokens[0].Color == Color;
-                    var content = isFirstToken ? Text.TrimStart() : Text;
-
-                    if (Color.HasValue) Console.ForegroundColor = Color.Value;
-                    else Console.ResetColor();
-
-                    Console.Write(content);
-                }
-
-                Console.ResetColor();
-
-                if (i < _lines.Count - 1 || j < wrappedLines.Count - 1)
-                    Console.WriteLine();
-            }
+            Level = level;
+            Tokens.Add(new TreeToken(text, color));
         }
     }
 
-    private static List<List<TreeToken>> WrapTokens(List<TreeToken> tokens, int maxWidth)
-    {
-        var result = new List<List<TreeToken>>();
-        var current = new List<TreeToken>();
-        var lineLength = 0;
+    private static TreeNode? _root;
+    private static TreeNode? _lastAppendedNode;
+    private static int _lastLineLength;
+    private static List<bool> _lastGuides = new();
+    private static TreeNode? _finalLeafNode;
 
-        foreach (var token in tokens)
-        {
-            var len = token.Text.Length;
-            if (lineLength + len > maxWidth && current.Count > 0)
-            {
-                result.Add(current);
-                current = new List<TreeToken>();
-                lineLength = 0;
-            }
-
-            current.Add(token);
-            lineLength += len;
-        }
-
-        if (current.Count > 0)
-            result.Add(current);
-
-        return result;
-    }
-
-    private static int GetPrefixWidth(bool[] guides) =>
-        4 * (guides.Length == 0 ? 0 : guides.Length);
-
-    private static bool[] GetSiblingGuides(int index)
-    {
-        int level = _lines[index].Level;
-        var guides = new bool[level];
-
-        for (int l = 0; l < level; l++)
-        {
-            for (int i = index + 1; i < _lines.Count; i++)
-            {
-                var next = _lines[i];
-                if (next.Level < l + 1) break;
-                if (next.Level == l + 1)
-                {
-                    guides[l] = true;
-                    break;
-                }
-            }
-        }
-
-        return guides;
-    }
-
-    private static bool IsLastSibling(int index)
-    {
-        int level = _lines[index].Level;
-        for (int i = index + 1; i < _lines.Count; i++)
-        {
-            if (_lines[i].Level == level) return false;
-            if (_lines[i].Level < level) break;
-        }
-        return true;
-    }
+    private static int _streamingVersion = 0;
+    private static int _lastStreamVersion = -1;
 
     public static void Reset()
     {
-        _lines.Clear();
-        _currentLevel = 0;
+        _root = null;
+        _lastAppendedNode = null;
+        _lastLineLength = 0;
+        _lastGuides.Clear();
+        _streamingVersion++;
         Console.Clear();
+    }
+
+    public static TreeHandle CreateRoot(string label, ConsoleColor? color = null)
+    {
+        if (_root is not null)
+            Reset();
+
+        _root = new TreeNode(0, label, color);
+        RedrawAll();
+        return new TreeHandle(_root);
+    }
+
+    public static TreeHandle CreateSubtree(string label, ConsoleColor? color = null)
+    {
+        if (_root is null)
+            throw new InvalidOperationException("Must call TreePrinter.CreateRoot(...) first.");
+
+        var child = new TreeNode(_root.Level + 1, label, color);
+        _root.Children.Add(child);
+        RedrawAll();
+        return new TreeHandle(child);
+    }
+
+    private static void RedrawAll()
+    {
+        _streamingVersion++;
+        Console.Clear();
+        _lastAppendedNode = null;
+        _lastLineLength = 0;
+        _lastGuides.Clear();
+
+        if (_root != null)
+        {
+            _finalLeafNode = GetDeepestRightmost(_root);
+            PrintNode(_root, new List<bool>(), isLast: true);
+        }
+    }
+
+    private static TreeNode GetDeepestRightmost(TreeNode node)
+    {
+        while (node.Children.Count > 0)
+            node = node.Children[^1];
+        return node;
+    }
+
+    private static void PrintNode(TreeNode node, List<bool> guides, bool isLast)
+    {
+        int prefixWidth = 4 * (guides.Count == 0 ? 0 : guides.Count);
+        int availableWidth = Console.WindowWidth - prefixWidth;
+
+        var tokens = node.Tokens;
+        var line = new List<TreeToken>();
+        int lineLen = 0;
+
+        void PrintPrefix(bool isFirstLine)
+        {
+            Console.ForegroundColor = ConsoleColor.White;
+            for (int i = 0; i < guides.Count - 1; i++)
+                Console.Write(guides[i] ? "│   " : "    ");
+            if (guides.Count > 0)
+                Console.Write(isFirstLine ? (isLast ? "└── " : "├── ") : (isLast ? "    " : "│   "));
+            Console.ResetColor();
+        }
+
+        for (int i = 0; i < tokens.Count; i++)
+        {
+            var token = tokens[i];
+            var text = token.Text;
+            var color = token.Color;
+            int tokenLen = text.Length;
+
+            if (lineLen + tokenLen > availableWidth && line.Count > 0)
+            {
+                PrintPrefix(isFirstLine: line == tokens.GetRange(0, line.Count));
+                foreach (var t in line)
+                {
+                    if (t.Color.HasValue) Console.ForegroundColor = t.Color.Value;
+                    Console.Write(t.Text);
+                    Console.ResetColor();
+                }
+                Console.WriteLine();
+
+                line.Clear();
+                lineLen = 0;
+            }
+
+            line.Add(token);
+            lineLen += tokenLen;
+        }
+
+        if (line.Count > 0)
+        {
+            PrintPrefix(isFirstLine: tokens.Count == line.Count);
+            foreach (var t in line)
+            {
+                if (t.Color.HasValue) Console.ForegroundColor = t.Color.Value;
+                Console.Write(t.Text);
+                Console.ResetColor();
+            }
+            if (node != _finalLeafNode)
+                Console.WriteLine();
+        }
+
+        // Update streaming context
+        _lastAppendedNode = node;
+        _lastLineLength = prefixWidth + GetLineTextLength(tokens);
+        _lastGuides = new List<bool>(guides);
+        _lastStreamVersion = _streamingVersion;
+
+        // Recurse
+        for (int i = 0; i < node.Children.Count; i++)
+        {
+            var child = node.Children[i];
+            var childIsLast = i == node.Children.Count - 1;
+            var childGuides = new List<bool>(guides) { !childIsLast };
+            PrintNode(child, childGuides, childIsLast);
+        }
+    }
+
+    private static int GetLineTextLength(List<TreeToken> tokens)
+    {
+        int len = 0;
+        foreach (var token in tokens)
+            len += token.Text.Length;
+        return len;
+    }
+
+    private static void StreamAppend(TreeNode node, string text, ConsoleColor? color)
+    {
+        if (node != _lastAppendedNode || _lastStreamVersion != _streamingVersion)
+        {
+            node.Tokens.Add(new TreeToken(text, color));
+            RedrawAll();
+            return;
+        }
+
+        int maxWidth = Console.WindowWidth;
+        if (_lastLineLength + text.Length > maxWidth)
+        {
+            Console.WriteLine();
+
+            Console.ForegroundColor = ConsoleColor.White;
+            for (int i = 0; i < _lastGuides.Count; i++)
+                Console.Write("    ");
+            Console.ResetColor();
+
+            text = text.TrimStart();
+            _lastLineLength = 4 * _lastGuides.Count + text.Length;
+        }
+        else
+        {
+            _lastLineLength += text.Length;
+        }
+
+        node.Tokens.Add(new TreeToken(text, color));
+
+        if (color.HasValue) Console.ForegroundColor = color.Value;
+        Console.Write(text);
+        Console.ResetColor();
+    }
+
+    public sealed class TreeHandle
+    {
+        private readonly TreeNode _node;
+
+        public TreeHandle(TreeNode node)
+        {
+            _node = node;
+        }
+
+        public void Print(string text, ConsoleColor? color = null)
+        {
+            _node.Tokens.Add(new TreeToken(text, color));
+            RedrawAll();
+        }
+
+        public void Append(string word, ConsoleColor? color = null)
+        {
+            StreamAppend(_node, word, color);
+        }
+
+        public TreeHandle CreateSubtree(string text, ConsoleColor? color = null)
+        {
+            var child = new TreeNode(_node.Level + 1, text, color);
+            _node.Children.Add(child);
+            RedrawAll();
+            return new TreeHandle(child);
+        }
     }
 }

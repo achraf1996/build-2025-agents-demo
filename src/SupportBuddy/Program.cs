@@ -15,7 +15,6 @@ using Azure.Identity;
 using DotNetEnv;
 using System.IO;
 
-
 // Load environment variables from .env file at application startup
 Env.Load(Path.Combine(AppContext.BaseDirectory, ".env"));
 

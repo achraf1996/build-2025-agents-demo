@@ -25,7 +25,7 @@ public sealed class AskUser(SendUserMessageService service) : KernelProcessStep<
     [KernelFunction("execute")]
     public async Task ExecuteAsync(KernelProcessStepContext context, List<QuestionAnswer> QuestionAnswer)
     {
-        TreePrinter.Print("Asking user for details", ConsoleColor.White);
+        // TreePrinter.Print("Asking user for details", ConsoleColor.White);
 
         Env.Load(Path.Combine(AppContext.BaseDirectory, ".env"));
         

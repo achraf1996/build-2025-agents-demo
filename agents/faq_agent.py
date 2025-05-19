@@ -13,58 +13,16 @@ from azure.ai.agents.models import (
 load_dotenv()
 
 # Constants
-MODEL_NAME = "gpt-4.1"
-AGENT_NAME = "faq-agent"
+MODEL_NAME = "gpt-4.1-mini"
+AGENT_NAME = "FAQ Agent (with exact answers)"
 AGENT_ENV_KEY = "FAQ_AGENT_ID"
 OPENAPI_SPEC_PATH = os.path.join(os.path.dirname(__file__), "tools/cqa_tool.json")
 CONNECTION_ID = "/subscriptions/8038977e-bdd7-447a-a194-d640a385ebcf/resourceGroups/rg-admin-0541/providers/Microsoft.CognitiveServices/accounts/mabolan-build-2025-demo-resource/projects/mabolan-build-2025-demo/connections/language-demo-connection"
 
 INSTRUCTIONS = """Get answers for the user's questions by using the faq and return the exact answer without rewriting the answer. Format the answers in JSON.
 
-You MUST use the cqa_tool. Do not rely on your own knowledge.
-
-{
-    "answered_questions": [
-        {
-            "questionId": "233414",
-            "answer": "The market size of the company is $1 billion."
-        },
-        {
-            "questionId": "221123",
-            "answer": "The user sentiment is positive."
-        }
-    ],
-    "unanswered_questions": [""164234", "851234"]
-}"""
-
-RESPONSE_FORMAT = {
-    "type": "json_schema",
-    "json_schema": {
-        "name": "answered_questions",
-        "schema": {
-            "type": "object",
-            "properties": {
-                "answered_questions": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    },
-                },
-                "unanswered_questions": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "question": {"type": "string"},
-                        },
-                        "required": ["question"],
-                    },
-                },
-            },
-            "required": ["answered_questions", "unanswered_questions"],
-        },
-    },
-}
+You MUST use the FAQ tool. Do not rely on your own knowledge. If the answer is not found by the FAQ tool, say "I don't know" for that specific question.
+```"""
 
 
 def get_project_endpoint() -> str:
@@ -94,7 +52,6 @@ def create_agent(client: AIProjectClient, openapi_tool: OpenApiTool):
         model=MODEL_NAME,
         name=AGENT_NAME,
         tools=openapi_tool.definitions,
-        response_format=RESPONSE_FORMAT,
         instructions=INSTRUCTIONS
     )
     with open(".env", "a") as f:
@@ -108,7 +65,6 @@ def update_agent(client: AIProjectClient, agent_id: str, openapi_tool: OpenApiTo
         model=MODEL_NAME,
         name=AGENT_NAME,
         tools=openapi_tool.definitions,
-        response_format=RESPONSE_FORMAT,
         instructions=INSTRUCTIONS
     )
 

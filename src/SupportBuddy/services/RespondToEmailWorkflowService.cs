@@ -22,8 +22,7 @@ public class RespondToEmailWorkflowService(
         var kernel = CreateKernel();
         var kernelProcess = await CreateWorkflowAsync();
 
-        TreePrinter.Print($"Process starting with ID: " + email.Id, ConsoleColor.Blue);
-        TreePrinter.Indent();
+        TreePrinter.CreateRoot("Process starting with ID: " + email.Id, ConsoleColor.Blue);
 
         // Kick off the workflow with an initial StartProcess event containing the email
         var runningProcess = await kernelProcess.StartAsync(
@@ -40,8 +39,7 @@ public class RespondToEmailWorkflowService(
         await processStateStore.SaveAsync(email.Id, state);
         var test = await processStateStore.GetAsync(email.Id);
 
-        TreePrinter.Print($"Process finished", ConsoleColor.Green);
-        TreePrinter.Unindent();
+        TreePrinter.CreateSubtree("Process finished", ConsoleColor.Green);
     }
 
     /// <summary>
@@ -51,16 +49,10 @@ public class RespondToEmailWorkflowService(
     {
         var kernel = CreateKernel();
 
-        TreePrinter.Print($"Process resuming with ID: {emailId}", ConsoleColor.Blue);
-        TreePrinter.Indent();
+        TreePrinter.CreateRoot("Process starting with ID: " + emailId, ConsoleColor.Blue);
 
         // Load saved process state by email ID
         var processState = await processStateStore.GetAsync(emailId);
-        if (processState == null)
-        {
-            TreePrinter.Print($"Error: No process found with ID: {emailId}", ConsoleColor.Red);
-            return;
-        }
 
         // Resume process with the user's answers
         await processState.StartAsync(
@@ -71,8 +63,7 @@ public class RespondToEmailWorkflowService(
                 Data = answeredQuestions
             });
 
-        TreePrinter.Print($"Process finished", ConsoleColor.Green);
-        TreePrinter.Unindent();
+        TreePrinter.CreateSubtree("Process finished", ConsoleColor.Green);
     }
 
     /// <summary>
