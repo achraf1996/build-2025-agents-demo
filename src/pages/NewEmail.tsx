@@ -1,24 +1,33 @@
-import React, { useState } from 'react'
-import { Send, Mail, User, FileText, Loader2, CheckCircle, AlertCircle } from 'lucide-react'
-
-interface EmailData {
-  id: string
-  from: string
-  to: string
-  subject: string
-  body: string
-}
+import React, { useState, useEffect } from 'react'
+import { Send, Mail, User, FileText, Loader2, CheckCircle, AlertCircle, Wifi, WifiOff } from 'lucide-react'
+import { apiService, EmailSubmissionData } from '../services/api'
+import { useApi } from '../hooks/useApi'
 
 const NewEmail: React.FC = () => {
-  const [formData, setFormData] = useState<Omit<EmailData, 'id'>>({
+  const [formData, setFormData] = useState<Omit<EmailSubmissionData, 'id'>>({
     from: '',
     to: 'support@company.com',
     subject: '',
     body: ''
   })
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle')
-  const [errorMessage, setErrorMessage] = useState('')
+  
+  const [connectionStatus, setConnectionStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking')
+  const { loading: isSubmitting, error: submitError, execute: submitEmail } = useApi()
+
+  // Test backend connection on component mount
+  useEffect(() => {
+    const testConnection = async () => {
+      try {
+        const response = await apiService.testConnection()
+        setConnectionStatus(response.success ? 'connected' : 'disconnected')
+      } catch (error) {
+        console.error('Connection test failed:', error)
+        setConnectionStatus('disconnected')
+      }
+    }
+
+    testConnection()
+  }, [])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
@@ -30,29 +39,15 @@ const NewEmail: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsSubmitting(true)
-    setSubmitStatus('idle')
-    setErrorMessage('')
+    
+    const emailData: EmailSubmissionData = {
+      id: Date.now().toString(),
+      ...formData
+    }
 
-    try {
-      const emailData: EmailData = {
-        id: Date.now().toString(),
-        ...formData
-      }
-
-      const response = await fetch('/api/new-email', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(emailData)
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      setSubmitStatus('success')
+    const response = await submitEmail(() => apiService.submitEmail(emailData))
+    
+    if (response.success) {
       // Reset form after successful submission
       setTimeout(() => {
         setFormData({
@@ -61,15 +56,7 @@ const NewEmail: React.FC = () => {
           subject: '',
           body: ''
         })
-        setSubmitStatus('idle')
       }, 3000)
-
-    } catch (error) {
-      console.error('Error submitting email:', error)
-      setSubmitStatus('error')
-      setErrorMessage(error instanceof Error ? error.message : 'An unexpected error occurred')
-    } finally {
-      setIsSubmitting(false)
     }
   }
 
@@ -77,13 +64,52 @@ const NewEmail: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Process New Email</h1>
-        <p className="mt-2 text-gray-600">
-          Submit a customer email to start the AI-powered support workflow
-        </p>
+      {/* Header with Connection Status */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Process New Email</h1>
+          <p className="mt-2 text-gray-600">
+            Submit a customer email to start the AI-powered support workflow
+          </p>
+        </div>
+        
+        {/* Connection Status Indicator */}
+        <div className="flex items-center space-x-2">
+          {connectionStatus === 'checking' && (
+            <>
+              <Loader2 className="h-4 w-4 text-gray-500 animate-spin" />
+              <span className="text-sm text-gray-500">Checking connection...</span>
+            </>
+          )}
+          {connectionStatus === 'connected' && (
+            <>
+              <Wifi className="h-4 w-4 text-success-600" />
+              <span className="text-sm text-success-600">Backend connected</span>
+            </>
+          )}
+          {connectionStatus === 'disconnected' && (
+            <>
+              <WifiOff className="h-4 w-4 text-red-600" />
+              <span className="text-sm text-red-600">Backend disconnected</span>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Connection Warning */}
+      {connectionStatus === 'disconnected' && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="flex items-center">
+            <AlertCircle className="h-5 w-5 text-red-600 mr-3" />
+            <div>
+              <h3 className="font-medium text-red-800">Backend Connection Failed</h3>
+              <p className="text-sm text-red-600 mt-1">
+                Unable to connect to the SupportBuddy backend. Please ensure the .NET application is running on port 3978.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Email Form */}
@@ -168,7 +194,27 @@ const NewEmail: React.FC = () => {
             </div>
 
             {/* Status Messages */}
-            {submitStatus === 'success' && (
+            {!isSubmitting && !submitError && connectionStatus === 'connected' && (
+              <div className="flex items-center p-4 bg-success-50 border border-success-200 rounded-lg">
+                <CheckCircle className="h-5 w-5 text-success-600 mr-3" />
+                <div>
+                  <p className="font-medium text-success-800">Ready to submit</p>
+                  <p className="text-sm text-success-600">Backend is connected and ready to process emails.</p>
+                </div>
+              </div>
+            )}
+
+            {submitError && (
+              <div className="flex items-center p-4 bg-red-50 border border-red-200 rounded-lg">
+                <AlertCircle className="h-5 w-5 text-red-600 mr-3" />
+                <div>
+                  <p className="font-medium text-red-800">Submission failed</p>
+                  <p className="text-sm text-red-600">{submitError}</p>
+                </div>
+              </div>
+            )}
+
+            {!isSubmitting && !submitError && connectionStatus === 'connected' && (
               <div className="flex items-center p-4 bg-success-50 border border-success-200 rounded-lg">
                 <CheckCircle className="h-5 w-5 text-success-600 mr-3" />
                 <div>
@@ -178,21 +224,11 @@ const NewEmail: React.FC = () => {
               </div>
             )}
 
-            {submitStatus === 'error' && (
-              <div className="flex items-center p-4 bg-red-50 border border-red-200 rounded-lg">
-                <AlertCircle className="h-5 w-5 text-red-600 mr-3" />
-                <div>
-                  <p className="font-medium text-red-800">Error submitting email</p>
-                  <p className="text-sm text-red-600">{errorMessage}</p>
-                </div>
-              </div>
-            )}
-
             {/* Submit Button */}
             <div className="flex justify-end pt-4 border-t border-gray-200">
               <button
                 type="submit"
-                disabled={!isFormValid || isSubmitting}
+                disabled={!isFormValid || isSubmitting || connectionStatus !== 'connected'}
                 className="btn-primary min-w-[140px]"
               >
                 {isSubmitting ? (
@@ -286,6 +322,18 @@ const NewEmail: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {/* Debug Info */}
+          {process.env.NODE_ENV === 'development' && (
+            <div className="card bg-gray-50">
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">Debug Info</h3>
+              <div className="text-xs text-gray-600 space-y-1">
+                <div>Backend URL: {window.location.origin}/api</div>
+                <div>Connection: {connectionStatus}</div>
+                <div>Form Valid: {isFormValid ? 'Yes' : 'No'}</div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

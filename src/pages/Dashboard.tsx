@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { 
   Mail, 
@@ -8,42 +8,75 @@ import {
   AlertCircle,
   TrendingUp,
   Users,
-  Zap
+  Zap,
+  Wifi,
+  WifiOff,
+  Loader2
 } from 'lucide-react'
+import { apiService } from '../services/api'
 
 const Dashboard: React.FC = () => {
+  const [connectionStatus, setConnectionStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking')
+  const [systemData, setSystemData] = useState<any>(null)
+
+  useEffect(() => {
+    const checkConnection = async () => {
+      try {
+        const response = await apiService.testConnection()
+        setConnectionStatus(response.success ? 'connected' : 'disconnected')
+        
+        if (response.success) {
+          // Try to fetch system status if available
+          const statusResponse = await apiService.getSystemStatus()
+          if (statusResponse.success) {
+            setSystemData(statusResponse.data)
+          }
+        }
+      } catch (error) {
+        console.error('Connection check failed:', error)
+        setConnectionStatus('disconnected')
+      }
+    }
+
+    checkConnection()
+    
+    // Check connection every 30 seconds
+    const interval = setInterval(checkConnection, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
   const stats = [
     {
       name: 'Total Emails Processed',
-      value: '1,234',
+      value: systemData?.totalEmails || '1,234',
       change: '+12%',
       changeType: 'positive',
       icon: Mail,
     },
     {
       name: 'Active Workflows',
-      value: '23',
+      value: systemData?.activeWorkflows || '23',
       change: '+4',
       changeType: 'positive',
       icon: Clock,
     },
     {
       name: 'Completed Today',
-      value: '89',
+      value: systemData?.completedToday || '89',
       change: '+18%',
       changeType: 'positive',
       icon: CheckCircle,
     },
     {
       name: 'Pending Review',
-      value: '12',
+      value: systemData?.pendingReview || '12',
       change: '-2',
       changeType: 'negative',
       icon: AlertCircle,
     },
   ]
 
-  const recentEmails = [
+  const recentEmails = systemData?.recentEmails || [
     {
       id: '1',
       subject: 'Invoice inquiry for April',
@@ -82,7 +115,7 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      {/* Header */}
+      {/* Header with Connection Status */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
@@ -90,11 +123,51 @@ const Dashboard: React.FC = () => {
             Monitor your AI-powered email support workflow
           </p>
         </div>
-        <Link to="/new-email" className="btn-primary">
-          <Plus className="h-4 w-4 mr-2" />
-          Process New Email
-        </Link>
+        
+        <div className="flex items-center space-x-4">
+          {/* Connection Status */}
+          <div className="flex items-center space-x-2">
+            {connectionStatus === 'checking' && (
+              <>
+                <Loader2 className="h-4 w-4 text-gray-500 animate-spin" />
+                <span className="text-sm text-gray-500">Checking...</span>
+              </>
+            )}
+            {connectionStatus === 'connected' && (
+              <>
+                <Wifi className="h-4 w-4 text-success-600" />
+                <span className="text-sm text-success-600">Backend Online</span>
+              </>
+            )}
+            {connectionStatus === 'disconnected' && (
+              <>
+                <WifiOff className="h-4 w-4 text-red-600" />
+                <span className="text-sm text-red-600">Backend Offline</span>
+              </>
+            )}
+          </div>
+          
+          <Link to="/new-email" className="btn-primary">
+            <Plus className="h-4 w-4 mr-2" />
+            Process New Email
+          </Link>
+        </div>
       </div>
+
+      {/* Connection Warning */}
+      {connectionStatus === 'disconnected' && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="flex items-center">
+            <AlertCircle className="h-5 w-5 text-red-600 mr-3" />
+            <div>
+              <h3 className="font-medium text-red-800">Backend Connection Lost</h3>
+              <p className="text-sm text-red-600 mt-1">
+                Unable to connect to the SupportBuddy backend. Please ensure the .NET application is running on port 3978.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -177,31 +250,71 @@ const Dashboard: React.FC = () => {
             <h2 className="text-lg font-semibold text-gray-900 mb-4">System Status</h2>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">Backend Connection</span>
+                <div className="flex items-center">
+                  <div className={`h-2 w-2 rounded-full mr-2 ${
+                    connectionStatus === 'connected' ? 'bg-success-500' : 
+                    connectionStatus === 'checking' ? 'bg-warning-500 animate-pulse' : 'bg-red-500'
+                  }`}></div>
+                  <span className={`text-sm ${
+                    connectionStatus === 'connected' ? 'text-success-600' : 
+                    connectionStatus === 'checking' ? 'text-warning-600' : 'text-red-600'
+                  }`}>
+                    {connectionStatus === 'connected' ? 'Online' : 
+                     connectionStatus === 'checking' ? 'Checking' : 'Offline'}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-600">Triage Agent</span>
                 <div className="flex items-center">
-                  <div className="h-2 w-2 bg-success-500 rounded-full mr-2"></div>
-                  <span className="text-sm text-success-600">Online</span>
+                  <div className={`h-2 w-2 rounded-full mr-2 ${
+                    connectionStatus === 'connected' ? 'bg-success-500' : 'bg-gray-400'
+                  }`}></div>
+                  <span className={`text-sm ${
+                    connectionStatus === 'connected' ? 'text-success-600' : 'text-gray-500'
+                  }`}>
+                    {connectionStatus === 'connected' ? 'Online' : 'Unknown'}
+                  </span>
                 </div>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-600">FAQ Agent</span>
                 <div className="flex items-center">
-                  <div className="h-2 w-2 bg-success-500 rounded-full mr-2"></div>
-                  <span className="text-sm text-success-600">Online</span>
+                  <div className={`h-2 w-2 rounded-full mr-2 ${
+                    connectionStatus === 'connected' ? 'bg-success-500' : 'bg-gray-400'
+                  }`}></div>
+                  <span className={`text-sm ${
+                    connectionStatus === 'connected' ? 'text-success-600' : 'text-gray-500'
+                  }`}>
+                    {connectionStatus === 'connected' ? 'Online' : 'Unknown'}
+                  </span>
                 </div>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-600">RAG Agent</span>
                 <div className="flex items-center">
-                  <div className="h-2 w-2 bg-success-500 rounded-full mr-2"></div>
-                  <span className="text-sm text-success-600">Online</span>
+                  <div className={`h-2 w-2 rounded-full mr-2 ${
+                    connectionStatus === 'connected' ? 'bg-success-500' : 'bg-gray-400'
+                  }`}></div>
+                  <span className={`text-sm ${
+                    connectionStatus === 'connected' ? 'text-success-600' : 'text-gray-500'
+                  }`}>
+                    {connectionStatus === 'connected' ? 'Online' : 'Unknown'}
+                  </span>
                 </div>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-600">Reply Agent</span>
                 <div className="flex items-center">
-                  <div className="h-2 w-2 bg-success-500 rounded-full mr-2"></div>
-                  <span className="text-sm text-success-600">Online</span>
+                  <div className={`h-2 w-2 rounded-full mr-2 ${
+                    connectionStatus === 'connected' ? 'bg-success-500' : 'bg-gray-400'
+                  }`}></div>
+                  <span className={`text-sm ${
+                    connectionStatus === 'connected' ? 'text-success-600' : 'text-gray-500'
+                  }`}>
+                    {connectionStatus === 'connected' ? 'Online' : 'Unknown'}
+                  </span>
                 </div>
               </div>
             </div>
